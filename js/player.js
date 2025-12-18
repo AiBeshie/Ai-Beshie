@@ -211,7 +211,7 @@ const renderBaseIV = (label, value, color) => `
 
   <!-- RIGHT COLUMN : COMBAT STATS -->
   <div style="flex:1;">
-    <strong style="color:#FF4500;">Combat Stats:</strong>
+    <strong style="color:#FF4500;">Combat Stats:</strong> 
     <div>Crit: ${(poke.critRateTotal * 100).toFixed(1)}%${formatBonus(bonus.critRate, "%")}</div>
     <div>Crit Dmg: ${poke.critDmgTotal.toFixed(1)}${formatBonus(bonus.critDmg)}</div>
     <div>Dodge: ${(poke.dodgeRateTotal * 100).toFixed(1)}%${formatBonus(bonus.dodge, "%")}</div>
@@ -285,11 +285,43 @@ function hideTooltip() {
 }
 
 function attachTooltip(iconElement, poke) {
-  iconElement.addEventListener("mouseenter", () => showTooltip(poke, iconElement));
-  iconElement.addEventListener("mouseleave", hideTooltip);
+  let isTooltipVisible = false;
+
+  const show = () => {
+    showTooltip(poke, iconElement);
+    isTooltipVisible = true;
+  };
+
+  const hide = () => {
+    hideTooltip();
+    isTooltipVisible = false;
+  };
+
+  // --- Toggle tooltip on click (mobile-friendly) ---
+  iconElement.addEventListener("click", (e) => {
+    e.stopPropagation(); // para hindi agad ma-close
+    if (isTooltipVisible) {
+      hide();
+    } else {
+      show();
+    }
+  });
+
+  // --- Click outside closes tooltip ---
+  document.addEventListener("click", (e) => {
+    if (!iconElement.contains(e.target) && partyTooltip && !partyTooltip.contains(e.target)) {
+      hide();
+    }
+  });
+
+  // --- Hover for desktop ---
+  iconElement.addEventListener("mouseenter", () => {
+    if (!isTooltipVisible) show();
+  });
+  iconElement.addEventListener("mouseleave", () => {
+    if (isTooltipVisible) hide();
+  });
 }
-
-
 function attachTooltip(iconElement, poke) {
   let isTooltipVisible = false;
 
@@ -303,9 +335,9 @@ function attachTooltip(iconElement, poke) {
     isTooltipVisible = false;
   };
 
-  // --- Toggle tooltip on click ---
+  // --- Toggle tooltip on click (mobile-friendly) ---
   iconElement.addEventListener("click", (e) => {
-    e.stopPropagation(); // para hindi ma-close agad
+    e.stopPropagation(); // para hindi agad ma-close
     if (isTooltipVisible) {
       hide();
     } else {
@@ -313,17 +345,22 @@ function attachTooltip(iconElement, poke) {
     }
   });
 
-  // --- Hide tooltip if click outside ---
+  // --- Click outside closes tooltip ---
   document.addEventListener("click", (e) => {
     if (!iconElement.contains(e.target) && partyTooltip && !partyTooltip.contains(e.target)) {
       hide();
     }
   });
 
-  // --- Optional: hover for desktop ---
-  iconElement.addEventListener("mouseenter", show);
-  iconElement.addEventListener("mouseleave", hide);
+  // --- Hover for desktop ---
+  iconElement.addEventListener("mouseenter", () => {
+    if (!isTooltipVisible) show();
+  });
+  iconElement.addEventListener("mouseleave", () => {
+    if (isTooltipVisible) hide();
+  });
 }
+
 
 
 // ------------------ PLAYER PARTY DISPLAY ------------------
@@ -340,38 +377,37 @@ function updatePartyDisplay() {
   if (window.player.activeIndex >= window.player.party.length) window.player.activeIndex = 0;
 
   window.player.party.forEach((poke, index) => {
-    // Ensure stats, talents, CP, and HP are applied once
-    if (!poke.talents) assignTalents(poke);
-    applyTalentModifiers(poke);
-    calculateCP(poke);
-    syncCurrentHP(poke);
+  if (!poke.talents) assignTalents(poke);
+  applyTalentModifiers(poke);
+  calculateCP(poke);
+  syncCurrentHP(poke);
 
-    const pokeBtn = document.createElement("button");
-    pokeBtn.style.display = "inline-block";
-    pokeBtn.style.margin = "2px";
-    pokeBtn.style.cursor = "pointer";
-    pokeBtn.style.border = "none";
-    pokeBtn.style.background = "transparent";
-    pokeBtn.style.padding = "0";
-    pokeBtn.style.verticalAlign = "middle";
-    pokeBtn.innerHTML = `<img src="${getPokemonSprite(poke.pokemon_id, poke.shiny)}" style="width:64px;height:64px;">`;
+  const pokeBtn = document.createElement("button");
+  pokeBtn.style.display = "inline-block";
+  pokeBtn.style.margin = "2px";
+  pokeBtn.style.cursor = "pointer";
+  pokeBtn.style.border = "none";
+  pokeBtn.style.background = "transparent";
+  pokeBtn.style.padding = "0";
+  pokeBtn.style.verticalAlign = "middle";
+  pokeBtn.innerHTML = `<img src="${getPokemonSprite(poke.pokemon_id, poke.shiny)}" style="width:64px;height:64px;">`;
 
-    // Attach tooltip events
-    pokeBtn.addEventListener("mouseenter", (e) => showTooltip(poke, e.target));
-    pokeBtn.addEventListener("mouseleave", hideTooltip);
+  // Attach tooltip toggle
+  attachTooltip(pokeBtn, poke);
 
-    // Set active Pokémon on click
-    pokeBtn.addEventListener("click", () => {
-      if (window.player.activeIndex === index) return;
-      window.player.activeIndex = index;
-      const active = window.player.party[window.player.activeIndex];
-      updateBattleScreen(active, true);
-      updatePartyDisplay();
-      appendBattleLog(`${poke.pokemon_name} is now your active Pokémon!`, "player");
-    });
-
-    partyDisplay.appendChild(pokeBtn);
+  // Set active Pokémon on click
+  pokeBtn.addEventListener("click", () => {
+    if (window.player.activeIndex === index) return;
+    window.player.activeIndex = index;
+    const active = window.player.party[window.player.activeIndex];
+    updateBattleScreen(active, true);
+    updatePartyDisplay();
+    appendBattleLog(`${poke.pokemon_name} is now your active Pokémon!`, "player");
   });
+
+  partyDisplay.appendChild(pokeBtn);
+});
+
 }
 
 

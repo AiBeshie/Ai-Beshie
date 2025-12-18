@@ -79,7 +79,10 @@ function renderBagItems() {
     bagArea.style.display = 'none'; // hide items until category clicked
   }
 }
-
+function updateItemsDisplay() {
+  if (!activeBagCategory) return;
+  renderBagCategoryItems(activeBagCategory);
+}
 
 function renderBagCategoryItems(type) {
   const area = document.getElementById('itemsDisplay');
@@ -89,20 +92,18 @@ function renderBagCategoryItems(type) {
   if (!items) return;
 
   area.innerHTML = "";
-  area.style.display = 'grid'; // show items when category selected
-
-  const grid = document.createElement('div');
-  grid.className = 'item-buttons-grid';
-  grid.style.display = 'grid';
-  grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(80px, 1fr))';
-  grid.style.gap = '4px';
+  area.style.display = 'flex';
+  area.style.flexWrap = 'wrap';   // para mag-wrap kapag di kasya sa row
+  area.style.gap = '4px';
+  area.style.padding = '4px 0';
 
   let hasItems = false;
+
   Object.keys(items).forEach(item => {
     const qty = items[item];
-    if (qty <= 0) return;
-
+    if (qty <= 0) return; // auto-hide kung 0
     hasItems = true;
+
     const btn = document.createElement('button');
     btn.className = 'itemButton';
     btn.textContent = `${item} x${qty}`;
@@ -111,43 +112,59 @@ function renderBagCategoryItems(type) {
     btn.style.border = '2px solid #333';
     btn.style.borderRadius = '4px';
     btn.style.cursor = 'pointer';
-    btn.style.boxShadow = '1px 1px 0 #555';
-
+    btn.style.minWidth = '100px';
+    btn.style.flex = '0 0 auto';
     btn.onclick = () => useItem(type, item);
 
-    grid.appendChild(btn);
+    area.appendChild(btn);
   });
 
   if (!hasItems) {
     area.textContent = "No items";
-  } else {
-    area.appendChild(grid);
+    area.style.display = 'block';
   }
 }
 
-// ------------------ USE ITEM ------------------
+
 function useItem(itemType, itemName, targetPokemon = null) {
-  // Default to active Pokémon in the party if none provided
-  if (!targetPokemon) {
-    targetPokemon = window.activePokemon || window.player?.party?.[window.player.activeIndex];
-  }
-
-  if (!targetPokemon) return appendBattleLog("No Pokémon to use berry on.");
-
   const inv = window.player.items[itemType];
   if (!inv || inv[itemName] === undefined || inv[itemName] <= 0) {
     return alert("You don't have this item!");
   }
-  switch (itemType) {
+
+  // Kung walang target Pokémon, default sa active Pokémon sa party
+  if (!targetPokemon) {
+    targetPokemon = window.activePokemon || window.player?.party?.[window.player.activeIndex];
+  }
+
+  // Para sa items na kailangan ng Pokémon
+  const needsTarget = ["berries", "stones", "evolveItems"];
+  if (needsTarget.includes(itemType) && !targetPokemon) {
+    return appendBattleLog(`No Pokémon to use ${itemName} on.`);
+  }
+
+  // APPLY EFFECT
+  switch(itemType) {
     case "berries":
       handleBerry(itemName, targetPokemon);
       break;
 
-    case "balls":
-      if (window.isCatching) return;
-      if (typeof window.catchPokemon === "function") window.catchPokemon(itemName);
-      else appendBattleLog(`Tried to use ${itemName}, but catch function not found.`);
-      break;
+case "balls":
+  const wild = window.currentWild; // dito ang actual wild Pokémon
+  if (!window.isCatching && wild) {
+    if (typeof window.catchPokemon === "function") {
+      window.catchPokemon(itemName);
+    } else {
+      appendBattleLog(`Tried to use ${itemName}, but catch function not found.`);
+    }
+  } else {
+    appendBattleLog(`No wild Pokémon to throw ${itemName} at.`);
+    return; // huwag bawasan ang quantity
+  }
+break;
+
+
+
 
     case "stones":
     case "evolveItems":
@@ -167,9 +184,13 @@ function useItem(itemType, itemName, targetPokemon = null) {
       break;
   }
 
+  // DECREMENT ITEM QUANTITY
   inv[itemName]--;
-  updateItemsDisplay();
-  safeUpdatePlayerDisplay();
+  if (inv[itemName] <= 0) inv[itemName] = 0;
+
+  // UPDATE UI
+  updateItemsDisplay();      // refresh bag grid
+  safeUpdatePlayerDisplay(); // refresh coins / player info
 }
 
 // ------------------ BERRY EFFECTS ------------------
@@ -239,45 +260,69 @@ const shopItems = [
   { type:"evolveItems", name:"unovaStone", cost:800 }
 ];
 
-// ------------------ SHOP DISPLAY ------------------
+let activeShopCategory = null; // currently selected shop category
+
+
 function updateShopDisplay() {
   const shop = document.getElementById("shopItems");
-  if (!shop) return;
+  const catContainer = document.getElementById("shopCategoryButtons");
+  if (!shop || !catContainer) return;
 
   shop.innerHTML = "";
-  const categories = {};
+  catContainer.innerHTML = "";
 
-  shopItems.forEach(i => {
-    if (!categories[i.type]) categories[i.type] = [];
-    categories[i.type].push(i);
+  // Categories
+  const categories = [...new Set(shopItems.map(i => i.type))];
+
+  categories.forEach(type => {
+    const btn = document.createElement("button");
+    btn.className = "itemCategoryBtn";
+    btn.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+
+    if (activeShopCategory === type) {
+      btn.style.background = "#ffae00";
+      btn.style.color = "#000";
+    } else {
+      btn.style.background = itemColors[type] || "#2196F3";
+      btn.style.color = "#fff";
+    }
+
+    btn.onclick = () => {
+      activeShopCategory = type;
+      updateShopDisplay();
+    };
+
+    catContainer.appendChild(btn);
   });
 
-  for (let type in categories) {
-    const typeDiv = document.createElement("div");
-    typeDiv.className = "item-category";
+  if (!activeShopCategory) return; // nothing selected
 
-    const header = document.createElement("strong");
-    header.textContent = type.charAt(0).toUpperCase() + type.slice(1);
-    typeDiv.appendChild(header);
+  const itemsGrid = document.createElement("div");
+  itemsGrid.className = "item-buttons-grid";
+  itemsGrid.style.display = "grid";
+  itemsGrid.style.gridTemplateColumns = "repeat(auto-fill, minmax(120px, 1fr))";
+  itemsGrid.style.gap = "4px";
 
-    const gridDiv = document.createElement("div");
-    gridDiv.className = "item-buttons-grid";
-
-    categories[type].forEach(item => {
+  shopItems
+    .filter(item => item.type === activeShopCategory)
+    .forEach(item => {
       const btn = document.createElement("button");
       btn.className = "shopButton";
       btn.textContent = `${item.name} - ${item.cost} coins`;
-      btn.onclick = () => buyItem(item.type, item.name, item.cost);
+      btn.style.background = itemColors[item.type] || "#ccc";
+      btn.style.color = "#000";
+      btn.style.border = "2px solid #333";
+      btn.style.borderRadius = "4px";
+      btn.style.cursor = "pointer";
 
-      gridDiv.appendChild(btn);
+      btn.onclick = () => buyItem(item.type, item.name, item.cost);
+      itemsGrid.appendChild(btn);
     });
 
-    if (gridDiv.children.length > 0) {
-      typeDiv.appendChild(gridDiv);
-      shop.appendChild(typeDiv);
-    }
-  }
+  shop.appendChild(itemsGrid);
 }
+
+
 
 // ------------------ BUY ITEM ------------------
 function buyItem(type, name, cost) {
@@ -330,3 +375,7 @@ if (document.readyState === "loading") {
 } else {
   initItemsModule();
 }
+document.addEventListener('DOMContentLoaded', () => {
+  updateShopDisplay();
+});
+
