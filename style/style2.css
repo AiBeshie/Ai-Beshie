@@ -263,7 +263,6 @@ html, body {
 }
 .menu-section button:hover { background:#ffd34d; }
 
-/* Uniform grid for items if needed */
 /* Uniform grid for items */
 #itemsDisplay, #shopItems, #storageDisplay, #regionButtons, #mapButtons {
   display: grid;
@@ -283,6 +282,7 @@ html, body {
   background: #333;
   border-radius: 3px;
 }
+
 
 
 
