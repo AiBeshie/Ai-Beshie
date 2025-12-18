@@ -1,7 +1,7 @@
 // ------------------ PLAYER INIT ------------------
 if (!window.player) {
   window.player = {
-    level: 2,
+    level: 1,
     coins: 250,
     stardust: 500,
     party: [],
@@ -553,7 +553,6 @@ async function catchPokemon(ballType = "pokeball", onComplete = null) {
   isCatching = false;
   if (onComplete) onComplete();
 }
-
 
 
 

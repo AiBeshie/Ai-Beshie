@@ -594,4 +594,3 @@ function levelUpPokemon(pokemon, expGain) {
     updateBattleScreen(pokemon, true);
   }
 }
-
