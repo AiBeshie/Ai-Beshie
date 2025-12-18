@@ -26,7 +26,7 @@ function initPlayer() {
 
 // ------------------ EXP FUNCTIONS ------------------
 function expToLevel(level) {
-  return 10 + level * level * 5; // quadratic growth
+  return 5 + level * level * 5; // quadratic growth
 }
 
 function getPokemonExpToNext(level) {
@@ -594,3 +594,4 @@ function levelUpPokemon(pokemon, expGain) {
     updateBattleScreen(pokemon, true);
   }
 }
+
