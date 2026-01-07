@@ -1,9 +1,7 @@
-
-
 const MAX_LEVEL = 50;
 const CPM_MAX_LEVEL = 30;
 
-
+// ------------------ STARTER ------------------
 function chooseRandomStarter() {
   const starters = window.pokemonDB.filter(p =>
     ["Bulbasaur", "Charmander", "Squirtle"].includes(p.pokemon_name)
@@ -13,64 +11,36 @@ function chooseRandomStarter() {
   const starter = starters[Math.floor(Math.random() * starters.length)];
   const ivs = generateIVs();
   const nature = determineNature(ivs);
-  const level = 2; // initial starter level
+  const level = 3;
 
-  if (!window.player) window.player = { level: 1, coins: 50, party: [] };
+  if (!window.player) window.player = { level: 1, coins: 50, party: [], activeIndex: null };
 
-  // Base starter object
   const starterPokemon = {
     ...starter,
     level,
     ivs,
     nature,
+    currentHP: null,
     currentEnergy: 0,
     max_energy: 100,
     critRate: 0.05,
     critDmg: 1.5,
     dodgeRate: 0.05,
+    isPlayer: true
   };
 
-  // Assign talents first
   assignTalents(starterPokemon);
 
-  // Apply talent modifiers, calculate CP, sync HP
-  renderPokemon(starterPokemon, true);
+  calculateStats(starterPokemon); // <-- now calculates stats including IV growth
+  syncCurrentHP(starterPokemon);
 
-  // Put in player party
   window.player.party[0] = starterPokemon;
+  window.player.activeIndex = null;
 
-  // Update UI
   updatePartyDisplay();
-
-  const playerSprite = document.getElementById("playerSprite");
-  if (playerSprite) {
-    playerSprite.src = `images/${starterPokemon.pokemon_name.toLowerCase()}.png`;
-    playerSprite.alt = "";
-  }
-
-  console.log("Starter chosen:", starterPokemon);
+  console.log("Starter chosen (party only):", starterPokemon);
   return starterPokemon;
 }
-
-// Updated renderPokemon to do everything in proper order
-function renderPokemon(pokemon, isPlayer = false) {
-  // 1️⃣ Apply talent modifiers (talents must already be assigned)
-  applyTalentModifiers(pokemon);
-
-  // 2️⃣ Calculate CP
-  calculateCP(pokemon);
-
-  // 3️⃣ Sync HP based on updated staTotal
-  syncCurrentHP(pokemon);
-
-  // 4️⃣ Update UI if requested
-  if (isPlayer || isPlayer === false) updateBattleScreen(pokemon, isPlayer);
-
-  return pokemon;
-}
-
-
-
 
 // ------------------ TYPE CHART ------------------
 const typeChart = {
@@ -124,54 +94,108 @@ function generateIVs() {
   };
 }
 
+// ------------------ CALCULATE STATS WITH IV ------------------
+function calculateStats(pokemon) {
+  const level = Math.min(pokemon.level || 1, MAX_LEVEL);
+  const cpm = CPM[Math.min(level, CPM_MAX_LEVEL)];
+  const levelMultiplier = 1 + (level - 1) * 0.02;
+
+  // Base scaled stats
+  const baseAtk = (pokemon.base_attack || 10) * cpm * levelMultiplier;
+  const baseDef = (pokemon.base_defense || 10) * cpm * levelMultiplier;
+  const baseSta = (pokemon.base_stamina || 10) * cpm * levelMultiplier;
+
+  // --- IV scaling factor (makes IVs matter more) ---
+  const ivAtkFactor = 0.7 + (pokemon.ivs?.attack || 0) / 15 * 0.3;
+  const ivDefFactor = 0.7 + (pokemon.ivs?.defense || 0) / 15 * 0.3;
+  const ivStaFactor = 0.7 + (pokemon.ivs?.stamina || 0) / 15 * 0.3;
+
+  let atk = Math.max(5, baseAtk * ivAtkFactor);
+  let def = Math.max(5, baseDef * ivDefFactor);
+  let sta = Math.max(10, baseSta * ivStaFactor);
+
+  // Apply talents
+  if (pokemon.talents?.length) {
+    const talentScale = level / MAX_LEVEL;
+    let atkBonus = 0, defBonus = 0, staBonus = 0;
+    let critRateBonus = 0, critDmgBonus = 0, dodgeBonus = 0;
+
+    pokemon.talents.forEach(t => {
+      atkBonus += (t.atk || 0) * talentScale;
+      defBonus += (t.def || 0) * talentScale;
+      staBonus += (t.sta || 0) * talentScale;
+      critRateBonus += (t.critRate || 0) * talentScale;
+      critDmgBonus += (t.critDmg || 0) * talentScale;
+      dodgeBonus += (t.dodgeRate || 0) * talentScale;
+    });
+
+    atk += atkBonus;
+    def += defBonus;
+    sta += staBonus;
+
+    pokemon.critRateTotal = (pokemon.critRate || 0.05) + critRateBonus;
+    pokemon.critDmgTotal = (pokemon.critDmg || 1.5) + critDmgBonus;
+    pokemon.dodgeRateTotal = (pokemon.dodgeRate || 0.05) + dodgeBonus;
+
+    pokemon.bonusApplied = {
+      atk: atkBonus.toFixed(1),
+      def: defBonus.toFixed(1),
+      sta: staBonus.toFixed(1),
+      critRate: critRateBonus.toFixed(2),
+      critDmg: critDmgBonus.toFixed(2),
+      dodge: dodgeBonus.toFixed(2)
+    };
+  } else {
+    pokemon.critRateTotal = pokemon.critRate || 0.05;
+    pokemon.critDmgTotal = pokemon.critDmg || 1.5;
+    pokemon.dodgeRateTotal = pokemon.dodgeRate || 0.05;
+  }
+
+  pokemon.atkTotal = atk;
+  pokemon.defTotal = def;
+  pokemon.staTotal = sta;
+
+  calculateCP(pokemon); // recalc CP after stats
+}
+
 // ------------------ NATURE DETERMINATION ------------------
 function determineNature(ivs) {
-  const atk = Number(ivs.attack ?? 0);
-  const def = Number(ivs.defense ?? 0);
-  const sta = Number(ivs.stamina ?? 0);
-
+  const { attack: atk = 0, defense: def = 0, stamina: sta = 0 } = ivs;
   const total = atk + def + sta;
+
+  if (total === 45) return "Mythical";
+  if (total >= 42) return "Legendary";
+
   const stats = [
     { name: "atk", value: atk },
     { name: "def", value: def },
     { name: "sta", value: sta }
   ];
 
-  if (total === 45) return "Mythical";
-  if (total >= 42 && total <= 44) return "Legendary";
-
-  const topCandidates = stats.filter(s => s.value >= 10);
-  if (topCandidates.length >= 2) {
-    const sorted = topCandidates.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
-    const pair = [sorted[0].name, sorted[1].name].sort().join(",");
-    if (pair === "atk,def") return "Mighty";
-    if (pair === "atk,sta") return "Fierce";
-    if (pair === "def,sta") return "Sturdy";
-  }
-
-  const singleTop = stats.filter(s => s.value >= 10);
-  const lowCount = stats.filter(s => s.value <= 9).length;
-  if (singleTop.length === 1 && lowCount === 2) {
-    const topName = singleTop[0].name;
-    if (topName === "atk") return "Brave";
-    if (topName === "def") return "Timid";
-    if (topName === "sta") return "Bold";
+  const top = stats.filter(s => s.value >= 10).map(s => s.name).sort();
+  if (top.length === 2) {
+    if (top.join() === "atk,def") return "Mighty";
+    if (top.join() === "atk,sta") return "Fierce";
+    if (top.join() === "def,sta") return "Sturdy";
+  } else if (top.length === 1) {
+    return { atk: "Brave", def: "Timid", sta: "Bold" }[top[0]];
   }
 
   if (atk === def && def === sta) {
-    if (atk >= 0 && atk <= 3) return "Humble";
-    if (atk >= 4 && atk <= 6) return "Steady";
-    if (atk >= 7 && atk <= 9) return "Solid";
-    if (atk >= 10 && atk <= 14) return "Prime";
+    if (atk <= 3) return "Humble";
+    if (atk <= 6) return "Steady";
+    if (atk <= 9) return "Solid";
+    return "Prime";
   }
 
   const maxIV = Math.max(atk, def, sta);
-  if (maxIV >= 1 && maxIV <= 3) return "Mild";
-  if (maxIV >= 4 && maxIV <= 6) return "Plain";
-  if (maxIV >= 7 && maxIV <= 9) return "Rookie";
+  if (maxIV <= 3) return "Mild";
+  if (maxIV <= 6) return "Plain";
+  if (maxIV <= 9) return "Rookie";
 
   return "Neutral";
 }
+
 
 
 // ---------- NATURE COLOR MAP ----------
@@ -289,63 +313,62 @@ function renderTalentWithIcon(talent) {
 
 
 
-
 const talentPools = {
   Common: [
-    { name: "Energetic", atk: +5, def: 0, sta: 0 },
-    { name: "Clumsy", atk: -5, def: 0, sta: +5 },
-    { name: "Tough", def: +5, sta: +5, atk: 0 },
-    { name: "Agile", dodgeRate: +0.02 },
-    { name: "Resistant", def: +3, sta: +3 },
-    { name: "Sharp", atk: +3 }
+    { name: "Energetic", atk: 5 },          // +5% atk
+    { name: "Clumsy", atk: -5, sta: 5 },    // -5% atk, +5% sta
+    { name: "Tough", def: 5, sta: 5 },      // +5% def & sta
+    { name: "Agile", dodgeRate: 0.02 },
+    { name: "Resistant", def: 3, sta: 3 },  // +3% def & sta
+    { name: "Sharp", atk: 3 }               // +3% atk
   ],
   Uncommon: [
-    { name: "Focused", atk: +7, critRate: +0.05 },
-    { name: "Resilient", def: +7, sta: +3 },
-    { name: "Swift", fastAtkBoost: +5, dodgeRate: +0.03 },
-    { name: "Balanced", atk: +3, def: +3, sta: +3 },
-    { name: "Nimble", dodgeRate: +0.05 },
-    { name: "Keen", critRate: +0.04, atk: +4 }
+    { name: "Focused", atk: 7, critRate: 0.05 },
+    { name: "Resilient", def: 7, sta: 3 },
+    { name: "Swift", fastAtkBoost: 5, dodgeRate: 0.03 },
+    { name: "Balanced", atk: 3, def: 3, sta: 3 },
+    { name: "Nimble", dodgeRate: 0.05 },
+    { name: "Keen", atk: 4, critRate: 0.04 }
   ],
   Rare: [
-    { name: "Savage", atk: +10, def: -5 },
-    { name: "Fortified", def: +10, sta: +5 },
-    { name: "Precision", critRate: +0.07, critDmg: +0.07 },
-    { name: "Vigilant", def: +5, dodgeRate: +0.05 },
-    { name: "Feral", atk: +8, sta: +4 },
-    { name: "Sharpshooter", critRate: +0.08, critDmg: +0.05 }
+    { name: "Savage", atk: 10, def: -5 },
+    { name: "Fortified", def: 10, sta: 5 },
+    { name: "Precision", critRate: 0.07, critDmg: 0.07 },
+    { name: "Vigilant", def: 5, dodgeRate: 0.05 },
+    { name: "Feral", atk: 8, sta: 4 },
+    { name: "Sharpshooter", critRate: 0.08, critDmg: 0.05 }
   ],
   Epic: [
-    { name: "Berserker", atk: +15, def: -10, critRate: +0.05 },
-    { name: "Guardian", def: +15, sta: +10, atk: -5 },
-    { name: "Deadeye", critRate: +0.10, critDmg: +0.15, dodgeRate: -0.05 },
-    { name: "Stormbringer", atk: +12, critRate: +0.08 },
-    { name: "Ironwall", def: +12, sta: +8 },
-    { name: "Dodgemaster", dodgeRate: +0.08, atk: +4 }
+    { name: "Berserker", atk: 15, def: -10, critRate: 0.05 },
+    { name: "Guardian", def: 15, sta: 10, atk: -5 },
+    { name: "Deadeye", critRate: 0.10, critDmg: 0.15, dodgeRate: -0.05 },
+    { name: "Stormbringer", atk: 12, critRate: 0.08 },
+    { name: "Ironwall", def: 12, sta: 8 },
+    { name: "Dodgemaster", dodgeRate: 0.08, atk: 4 }
   ],
   Legendary: [
-    { name: "Titan", atk: +20, def: +10, sta: +15 },
-    { name: "Phantom", critRate: +0.15, critDmg: +0.20, dodgeRate: +0.10, def: -5 },
-    { name: "Invoker", atk: +15, critDmg: +0.15, sta: -5 },
-    { name: "Warbringer", atk: +18, sta: +10 },
-    { name: "Shieldbearer", def: +18, sta: +12, atk: -5 },
-    { name: "Trickster", critRate: +0.12, dodgeRate: +0.12, def: -5 }
+    { name: "Titan", atk: 20, def: 10, sta: 15 },
+    { name: "Phantom", critRate: 0.15, critDmg: 0.20, dodgeRate: 0.10, def: -5 },
+    { name: "Invoker", atk: 15, critDmg: 0.15, sta: -5 },
+    { name: "Warbringer", atk: 18, sta: 10 },
+    { name: "Shieldbearer", def: 18, sta: 12, atk: -5 },
+    { name: "Trickster", critRate: 0.12, dodgeRate: 0.12, def: -5 }
   ],
   Mythical: [
-    { name: "Godspeed", atk: +25, def: +25, sta: +25, critRate: +0.15, critDmg: +0.15 },
-    { name: "Eclipse", atk: +30, critRate: +0.20, dodgeRate: +0.15, def: -10 },
-    { name: "Solarflare", atk: +28, critDmg: +0.20, sta: +15 },
-    { name: "Aegis", def: +30, sta: +20, atk: -5 },
-    { name: "Shadowstep", dodgeRate: +0.20, critRate: +0.15, atk: +10 },
-    { name: "Overlord", atk: +35, def: +10, sta: +10, critDmg: +0.15 }
+    { name: "Godspeed", atk: 25, def: 25, sta: 25, critRate: 0.15, critDmg: 0.15 },
+    { name: "Eclipse", atk: 30, critRate: 0.20, dodgeRate: 0.15, def: -10 },
+    { name: "Solarflare", atk: 28, critDmg: 0.20, sta: 15 },
+    { name: "Aegis", def: 30, sta: 20, atk: -5 },
+    { name: "Shadowstep", dodgeRate: 0.20, critRate: 0.15, atk: 10 },
+    { name: "Overlord", atk: 35, def: 10, sta: 10, critDmg: 0.15 }
   ]
 };
 
+// ------------------ TALENTS ------------------
 function assignTalents(pokemon) {
   const assignedTalents = [];
   const talentCount = Math.random() < 0.5 ? 1 : 2;
 
-  // Helper to shuffle an array
   const shuffleArray = (array) => array.sort(() => Math.random() - 0.5);
 
   for (let i = 0; i < talentCount; i++) {
@@ -358,32 +381,18 @@ function assignTalents(pokemon) {
     else if (roll < 0.65) { pool = [...talentPools.Uncommon]; rarity = "Uncommon"; }
     else { pool = [...talentPools.Common]; rarity = "Common"; }
 
-    // Remove already assigned talents from the pool
     const availablePool = pool.filter(t => !assignedTalents.some(at => at.name === t.name));
+    if (availablePool.length === 0) continue;
 
-    if (availablePool.length === 0) continue; // nothing left to assign
-
-    // Shuffle and pick the first available talent
     const talent = shuffleArray(availablePool)[0];
-
-    // Assign color based on rarity
-    const colorMap = {
-      Mythical: "red",
-      Legendary: "yellow",
-      Epic: "purple",
-      Rare: "orange",
-      Uncommon: "green",
-      Common: "white"
-    };
-
+    const colorMap = { Mythical: "red", Legendary: "yellow", Epic: "purple", Rare: "orange", Uncommon: "green", Common: "white" };
     assignedTalents.push({ ...talent, rarity, color: colorMap[rarity] });
   }
 
   pokemon.talents = assignedTalents;
-  applyTalentModifiers(pokemon);
+  calculateStats(pokemon); // <-- apply talents immediately
   return assignedTalents;
 }
-
 
 
 
@@ -391,35 +400,32 @@ function applyTalentModifiers(pokemon) {
   const level = pokemon.level || 1;
   const effectiveLevel = Math.min(level, MAX_LEVEL);
 
-  // --- CPM stops at 30
   const cpmLevel = Math.min(effectiveLevel, CPM_MAX_LEVEL);
   const cpm = CPM[cpmLevel];
-
-  // --- True level scaling (locks at 50)
   const levelMultiplier = 1 + (effectiveLevel - 1) * 0.02;
 
-  const scaledBaseAtk = (pokemon.base_attack || 10) * cpm * levelMultiplier;
-  const scaledBaseDef = (pokemon.base_defense || 10) * cpm * levelMultiplier;
-  const scaledBaseSta = (pokemon.base_stamina || 10) * cpm * levelMultiplier;
-
-  // --- Talent scaling locked to 50
-  const talentScale = effectiveLevel / MAX_LEVEL;
+  const baseAtk = (pokemon.base_attack || 10) * cpm * levelMultiplier;
+  const baseDef = (pokemon.base_defense || 10) * cpm * levelMultiplier;
+  const baseSta = (pokemon.base_stamina || 10) * cpm * levelMultiplier;
 
   let atkBonus = 0, defBonus = 0, staBonus = 0;
   let critRateBonus = 0, critDmgBonus = 0, dodgeBonus = 0;
 
   pokemon.talents?.forEach(t => {
-    atkBonus += (t.atk || 0) * talentScale;
-    defBonus += (t.def || 0) * talentScale;
-    staBonus += (t.sta || 0) * talentScale;
-    critRateBonus += (t.critRate || 0) * talentScale;
-    critDmgBonus += (t.critDmg || 0) * talentScale;
-    dodgeBonus += (t.dodgeRate || 0) * talentScale;
+    // --- scale talent by base stat
+    if (t.atk) atkBonus += baseAtk * (t.atk / 100); // t.atk = % effect
+    if (t.def) defBonus += baseDef * (t.def / 100);
+    if (t.sta) staBonus += baseSta * (t.sta / 100);
+
+    // --- percentage stats (critRate, critDmg, dodge) still scale by level ratio
+    critRateBonus += (t.critRate || 0) * (effectiveLevel / MAX_LEVEL);
+    critDmgBonus += (t.critDmg || 0) * (effectiveLevel / MAX_LEVEL);
+    dodgeBonus += (t.dodgeRate || 0) * (effectiveLevel / MAX_LEVEL);
   });
 
-  pokemon.atkTotal = Math.max(5, scaledBaseAtk + (pokemon.ivs?.attack || 0) + atkBonus);
-  pokemon.defTotal = Math.max(5, scaledBaseDef + (pokemon.ivs?.defense || 0) + defBonus);
-  pokemon.staTotal = Math.max(10, scaledBaseSta + (pokemon.ivs?.stamina || 0) + staBonus);
+  pokemon.atkTotal = Math.max(5, baseAtk + (pokemon.ivs?.attack || 0) + atkBonus);
+  pokemon.defTotal = Math.max(5, baseDef + (pokemon.ivs?.defense || 0) + defBonus);
+  pokemon.staTotal = Math.max(10, baseSta + (pokemon.ivs?.stamina || 0) + staBonus);
 
   pokemon.critRateTotal = (pokemon.critRate || 0.05) + critRateBonus;
   pokemon.critDmgTotal = (pokemon.critDmg || 1.5) + critDmgBonus;
@@ -456,44 +462,48 @@ for (let i = 31; i <= 50; i++) {
   CPM[i] = CPM[i - 1] + 0.01; // example small increment per level
 }
 
-// ------------------ Calculate CP ------------------
+
+// ------------------ CP CALCULATION ------------------
+// ------------------ CP CALCULATION ------------------
 function calculateCP(pokemon) {
-  const level = pokemon.level || 1;
+  const level = pokemon.level || 1; // can be 1, 1.5, 2, 2.5 ...
   const effectiveLevel = Math.min(level, MAX_LEVEL);
 
-  const cpm = CPM[effectiveLevel] || 1.0; // now uses CPM up to level 50
+  // CPM supports .5 levels (GO-style)
+  const cpmIndex = Math.round(effectiveLevel * 2) / 2;
+  const cpm = CPM[Math.min(cpmIndex, CPM_MAX_LEVEL)];
 
   const atk = pokemon.atkTotal;
   const def = pokemon.defTotal;
   const sta = pokemon.staTotal;
 
-  let cp = Math.floor((atk * Math.sqrt(def) * Math.sqrt(sta) * cpm * cpm) / 10);
+  let rawCP = Math.floor(
+    (atk * Math.sqrt(def) * Math.sqrt(sta) * cpm * cpm) / 10
+  );
 
-  // Early game caps
-  if (effectiveLevel === 1) cp = Math.min(cp, 30);
-  else if (effectiveLevel <= 3) cp = Math.min(cp, 55);
-  else if (effectiveLevel <= 5) cp = Math.min(cp, 90);
-  else if (effectiveLevel <= 10) cp = Math.min(cp, 180);
+  rawCP = Math.max(10, rawCP);
 
-  cp = Math.max(10, cp);
-
-  // Final CP with talent bonus
+  // ---- MAX CP SCALING BY HALF LEVEL ----
   const baseMaxCP = pokemon.max_cp || 100;
-  const bonusMaxCP = calculateBonusMaxCP(pokemon);
-  const finalMaxCP = baseMaxCP + bonusMaxCP;
+  const bonus = calculateBonusMaxCP(pokemon);
+  const finalMaxCP = baseMaxCP + bonus;
 
-  pokemon.current_cp = Math.min(cp, finalMaxCP);
+  // Scale cap using half-level precision
+  const levelRatio = effectiveLevel / MAX_LEVEL;
+  const levelCap = Math.floor(finalMaxCP * levelRatio);
+
+  pokemon.current_cp = Math.min(rawCP, levelCap);
   pokemon.finalMaxCP = finalMaxCP;
 
   return pokemon.current_cp;
 }
+
 
 function calculateBonusMaxCP(pokemon) {
   const effectiveLevel = Math.min(pokemon.level || 1, MAX_LEVEL);
   const talentScale = effectiveLevel / MAX_LEVEL;
 
   let bonusPercent = 0;
-
   pokemon.talents?.forEach(t => {
     if (t.atk > 0) bonusPercent += t.atk * 0.002;
     if (t.def > 0) bonusPercent += t.def * 0.0015;
@@ -501,18 +511,9 @@ function calculateBonusMaxCP(pokemon) {
   });
 
   bonusPercent *= talentScale;
-
   const baseMax = pokemon.max_cp || 100;
-  let bonus = Math.floor(baseMax * bonusPercent);
-
-  // Safety cap (+25%)
-  bonus = Math.min(bonus, baseMax * 0.25);
-
-  return bonus;
+  return Math.min(Math.floor(baseMax * bonusPercent), baseMax * 0.25);
 }
-
-
-
 
 
 function calculateDamage(attacker, defender, moveName) {
@@ -566,12 +567,77 @@ function calculateDamage(attacker, defender, moveName) {
   return { damage: finalDamage, log: logParts.join(" ") };
 }
 
+// ------------------ SYNC HP ------------------
 function syncCurrentHP(pokemon) {
   if (!pokemon.staTotal) return;
-  const maxHP = Math.floor(pokemon.staTotal * 2);
-  pokemon.currentHP = Math.min(pokemon.currentHP ?? maxHP, maxHP);
-  pokemon.maxHP = maxHP;
+
+  const oldMax = pokemon.maxHP || Math.floor(pokemon.staTotal * 2);
+  const newMax = Math.floor(pokemon.staTotal * 2);
+  const ratio = pokemon.currentHP != null && oldMax > 0 ? pokemon.currentHP / oldMax : 1;
+
+  pokemon.maxHP = newMax;
+  pokemon.currentHP = Math.floor(newMax * ratio);
+  pokemon.currentHP = Math.max(0, Math.min(pokemon.currentHP, pokemon.maxHP));
 }
+
+function getRandomTalents(pokemon, maxTalents = 2) {
+  if (!pokemon) return [];
+
+  const assigned = [];
+  const talentCount = Math.min(maxTalents, 1 + Math.floor(Math.random() * 2)); // 1–2 talents
+
+  // --- Rarity weights depende sa level
+  const level = pokemon.level || 1;
+  let rarityWeights = {};
+  if (level <= 15) {
+    rarityWeights = { Mythical: 0, Legendary: 0.01, Epic: 0.05, Rare: 0.2, Uncommon: 0.3, Common: 0.44 };
+  } else if (level <= 30) {
+    rarityWeights = { Mythical: 0, Legendary: 0.02, Epic: 0.1, Rare: 0.25, Uncommon: 0.3, Common: 0.33 };
+  } else if (level <= 40) {
+    rarityWeights = { Mythical: 0.01, Legendary: 0.05, Epic: 0.2, Rare: 0.3, Uncommon: 0.3, Common: 0.14 };
+  } else { // level 41–50
+    rarityWeights = { Mythical: 0.02, Legendary: 0.1, Epic: 0.3, Rare: 0.35, Uncommon: 0.18, Common: 0.05 };
+  }
+
+  // --- pick rarity based on weights
+  const pickRarity = () => {
+    const roll = Math.random();
+    let cumulative = 0;
+    for (const [rarity, weight] of Object.entries(rarityWeights)) {
+      cumulative += weight;
+      if (roll <= cumulative) return rarity;
+    }
+    return "Common"; // fallback
+  };
+
+  for (let i = 0; i < talentCount; i++) {
+    const rarity = pickRarity();
+    const pool = [...talentPools[rarity]];
+
+    // remove already assigned talents
+    const available = pool.filter(t => !assigned.some(a => a.name === t.name));
+    if (!available.length) continue;
+
+    const talent = available[Math.floor(Math.random() * available.length)];
+
+    const colorMap = {
+      Mythical: "red",
+      Legendary: "yellow",
+      Epic: "purple",
+      Rare: "orange",
+      Uncommon: "green",
+      Common: "white"
+    };
+
+    assigned.push({ ...talent, rarity, color: colorMap[rarity] });
+  }
+
+  // --- Apply talent bonuses to Pokémon
+  applyTalentModifiers({ ...pokemon, talents: assigned });
+
+  return assigned;
+}
+
 
 
 // ------------------ ENERGY HANDLING ------------------
@@ -592,21 +658,5 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 
-function renderPokemon(pokemon, isPlayer = false) {
-  // Step 1: Apply talents & modifiers
-  assignTalents(pokemon);
-  applyTalentModifiers(pokemon);
-
-  // Step 2: Calculate CP
-  calculateCP(pokemon);
-
-  // Step 3: Sync HP
-  syncCurrentHP(pokemon);
-
-  // Step 4: Update UI if requested
-  if (isPlayer || isPlayer === false) updateBattleScreen(pokemon, isPlayer);
-
-  return pokemon;
-}
 
 
